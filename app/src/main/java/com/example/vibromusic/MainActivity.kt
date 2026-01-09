@@ -5,7 +5,7 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.*
 import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.lazy.*
+import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
@@ -14,7 +14,6 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.font.FontWeight
@@ -28,10 +27,16 @@ val VBlack = Color(0xFF121212)
 val VGreen = Color(0xFF1DB954)
 val VGray = Color(0xFF282828)
 
-data class Song(val id: String, val title: String, val artist: String, val cover: String, val streamUrl: String)
+data class Song(val title: String, val artist: String, val cover: String, val url: String)
 
 class MainActivity : ComponentActivity() {
     private var exoPlayer: ExoPlayer? = null
+
+    // Загрузка C++ библиотеки
+    companion object {
+        init { System.loadLibrary("vibromusic") }
+    }
+    external fun getNativeStatus(): String
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -40,48 +45,52 @@ class MainActivity : ComponentActivity() {
         setContent {
             var currentSong by remember { mutableStateOf<Song?>(null) }
             var isPlaying by remember { mutableStateOf(false) }
+            val nativeStatus = remember { getNativeStatus() }
 
             val playlist = listOf(
-                Song("1", "Lose Yourself", "Eminem", "https://i1.sndcdn.com/artworks-000030536712-l9f5h6-t500x500.jpg", "https://www.soundhelix.com/examples/mp3/SoundHelix-Song-1.mp3"),
-                Song("2", "Starboy", "The Weeknd", "https://upload.wikimedia.org/wikipedia/ru/3/39/The_Weeknd_-_Starboy.png", "https://www.soundhelix.com/examples/mp3/SoundHelix-Song-2.mp3")
+                Song("Lose Yourself", "Eminem", "https://i.ytimg.com/vi/xFYQQPAOz78/mqdefault.jpg", "https://www.soundhelix.com/examples/mp3/SoundHelix-Song-1.mp3"),
+                Song("Starboy", "The Weeknd", "https://i.ytimg.com/vi/34Na4j8AVgA/mqdefault.jpg", "https://www.soundhelix.com/examples/mp3/SoundHelix-Song-2.mp3")
             )
 
-            Scaffold(
-                containerColor = VBlack,
-                bottomBar = {
-                    currentSong?.let { song ->
-                        MiniPlayer(song, isPlaying) {
-                            if (isPlaying) exoPlayer?.pause() else exoPlayer?.play()
-                            isPlaying = !isPlaying
+            MaterialTheme {
+                Scaffold(
+                    containerColor = VBlack,
+                    bottomBar = {
+                        currentSong?.let { song ->
+                            MiniPlayer(song, isPlaying) {
+                                if (isPlaying) exoPlayer?.pause() else exoPlayer?.play()
+                                isPlaying = !isPlaying
+                            }
                         }
                     }
-                }
-            ) { padding ->
-                Column(modifier = Modifier.padding(padding).fillMaxSize().verticalScroll(rememberScrollState())) {
-                    Text("VibroMusic", color = VGreen, fontSize = 32.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(16.dp))
-                    
-                    playlist.forEach { song ->
-                        SongRow(song) {
-                            currentSong = song
-                            playStream(song.streamUrl)
-                            isPlaying = true
+                ) { padding ->
+                    Column(modifier = Modifier.padding(padding).fillMaxSize().verticalScroll(rememberScrollState())) {
+                        Text("VibroMusic", color = VGreen, fontSize = 32.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(16.dp))
+                        
+                        // Показываем статус из C++
+                        Text(nativeStatus, color = Color.Gray, fontSize = 12.sp, modifier = Modifier.padding(horizontal = 16.dp))
+
+                        Spacer(modifier = Modifier.height(20.dp))
+                        
+                        playlist.forEach { song ->
+                            SongItem(song) {
+                                currentSong = song
+                                val mediaItem = MediaItem.fromUri(song.url)
+                                exoPlayer?.setMediaItem(mediaItem)
+                                exoPlayer?.prepare()
+                                exoPlayer?.play()
+                                isPlaying = true
+                            }
                         }
                     }
                 }
             }
         }
     }
-
-    private fun playStream(url: String) {
-        val mediaItem = MediaItem.fromUri(url)
-        exoPlayer?.setMediaItem(mediaItem)
-        exoPlayer?.prepare()
-        exoPlayer?.play()
-    }
 }
 
 @Composable
-fun SongRow(song: Song, onClick: () -> Unit) {
+fun SongItem(song: Song, onClick: () -> Unit) {
     Row(modifier = Modifier.fillMaxWidth().clickable { onClick() }.padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
         AsyncImage(model = song.cover, contentDescription = null, modifier = Modifier.size(56.dp).clip(RoundedCornerShape(4.dp)), contentScale = ContentScale.Crop)
         Column(modifier = Modifier.padding(start = 16.dp)) {
