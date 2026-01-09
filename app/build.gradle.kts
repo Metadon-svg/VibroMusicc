@@ -44,15 +44,15 @@ dependencies {
     implementation("androidx.compose.material:material-icons-extended")
     implementation("io.coil-kt:coil-compose:2.5.0")
     
-    // Плеер и Уведомления (MediaSession)
+    // Media3 для плеера и уведомлений
     implementation("androidx.media3:media3-exoplayer:1.2.1")
     implementation("androidx.media3:media3-session:1.2.1")
     implementation("androidx.media3:media3-ui:1.2.1")
 
-    // Google Sign-In (Для входа в YouTube)
+    // Google Auth (Заглушка для входа)
     implementation("com.google.android.gms:play-services-auth:20.7.0")
 
-    // Сеть и JSON
+    // Сеть
     implementation("com.squareup.okhttp3:okhttp:4.12.0")
     implementation("com.google.code.gson:gson:2.10.1")
 }
