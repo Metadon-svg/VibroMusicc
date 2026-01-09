@@ -21,9 +21,15 @@ android {
     }
 
     buildTypes {
-        release { isMinifyEnabled = false; proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro") }
+        release {
+            isMinifyEnabled = false
+            proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
+        }
     }
-    compileOptions { sourceCompatibility = JavaVersion.VERSION_17; targetCompatibility = JavaVersion.VERSION_17 }
+    compileOptions {
+        sourceCompatibility = JavaVersion.VERSION_17
+        targetCompatibility = JavaVersion.VERSION_17
+    }
     kotlinOptions { jvmTarget = "17" }
     buildFeatures { compose = true }
     composeOptions { kotlinCompilerExtensionVersion = "1.5.8" }
@@ -37,12 +43,16 @@ dependencies {
     implementation("androidx.compose.material3:material3")
     implementation("androidx.compose.material:material-icons-extended")
     implementation("io.coil-kt:coil-compose:2.5.0")
+    
+    // Плеер и Уведомления (MediaSession)
     implementation("androidx.media3:media3-exoplayer:1.2.1")
-    // НОВЫЕ ЗАВИСИМОСТИ:
-    implementation("com.squareup.okhttp3:okhttp:4.12.0")
-    implementation("com.google.code.gson:gson:2.10.1")
     implementation("androidx.media3:media3-session:1.2.1")
     implementation("androidx.media3:media3-ui:1.2.1")
+
+    // Google Sign-In (Для входа в YouTube)
+    implementation("com.google.android.gms:play-services-auth:20.7.0")
+
+    // Сеть и JSON
     implementation("com.squareup.okhttp3:okhttp:4.12.0")
-    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.7.3")
+    implementation("com.google.code.gson:gson:2.10.1")
 }
