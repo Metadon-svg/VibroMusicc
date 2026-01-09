@@ -1,0 +1,40 @@
+name: Build VibroMusic
+
+on:
+  push:
+    branches: [ "main", "master" ] # Запуск при пуше в эти ветки
+  pull_request:
+    branches: [ "main", "master" ] # Запуск при создании PR
+  workflow_dispatch: # <--- ЭТА СТРОЧКА ДОБАВЛЯЕТ КНОПКУ РУЧНОГО ЗАПУСКА
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          java-version: '17'
+          distribution: 'temurin'
+          cache: gradle
+
+      # Создаем файл gradlew, если его нет (полезно при создании проекта с телефона)
+      - name: Ensure Gradlew exists
+        run: |
+          if [ ! -f gradlew ]; then
+            gradle wrapper --gradle-version 8.2
+          fi
+          chmod +x gradlew
+
+      - name: Build with Gradle
+        run: ./gradlew assembleDebug
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: VibroMusic-Debug-APK
+          path: app/build/outputs/apk/debug/app-debug.apk
