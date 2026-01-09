@@ -1,4 +1,4 @@
-name: Build VibroMusic
+name: Build VibroMusic Native
 
 on:
   push:
@@ -18,18 +18,16 @@ jobs:
           java-version: '17'
           distribution: 'temurin'
 
-      # Устанавливаем Gradle напрямую, не полагаясь на gradlew
       - name: Setup Gradle
         uses: gradle/actions/setup-gradle@v3
         with:
-          gradle-version: 8.5 # Фиксируем версию Gradle
+          gradle-version: 8.5
 
       - name: Build APK
-        # Запускаем сборку через установленный gradle, а не через ./gradlew
         run: gradle assembleDebug
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: VibroMusic-App
+          name: VibroMusic-Native
           path: app/build/outputs/apk/debug/app-debug.apk
