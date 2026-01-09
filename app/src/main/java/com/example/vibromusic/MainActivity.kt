@@ -3,6 +3,7 @@ package com.example.vibromusic
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
+import androidx.activity.enableEdgeToEdge
 import androidx.compose.foundation.*
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyRow
@@ -23,16 +24,17 @@ import androidx.media3.common.MediaItem
 import androidx.media3.exoplayer.ExoPlayer
 import coil.compose.AsyncImage
 
+// Цвета как в SimpMusic (Spotify Style)
 val VBlack = Color(0xFF121212)
 val VGreen = Color(0xFF1DB954)
-val VGray = Color(0xFF282828)
+val VGray = Color(0xFF1E1E1E)
 
-data class Song(val title: String, val artist: String, val cover: String, val url: String)
+data class Track(val id: String, val title: String, val artist: String, val cover: String, val streamUrl: String)
 
 class MainActivity : ComponentActivity() {
     private var exoPlayer: ExoPlayer? = null
 
-    // Загрузка C++ библиотеки
+    // C++ Мост (теперь он заработает, когда ты создашь файлы из Части 1)
     companion object {
         init { System.loadLibrary("vibromusic") }
     }
@@ -40,46 +42,68 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        
+        // Включаем прозрачные бары (как в SimpMusic)
+        enableEdgeToEdge()
+        
         exoPlayer = ExoPlayer.Builder(this).build()
 
         setContent {
-            var currentSong by remember { mutableStateOf<Song?>(null) }
+            var currentTrack by remember { mutableStateOf<Track?>(null) }
             var isPlaying by remember { mutableStateOf(false) }
             val nativeStatus = remember { getNativeStatus() }
 
-            val playlist = listOf(
-                Song("Lose Yourself", "Eminem", "https://i.ytimg.com/vi/xFYQQPAOz78/mqdefault.jpg", "https://www.soundhelix.com/examples/mp3/SoundHelix-Song-1.mp3"),
-                Song("Starboy", "The Weeknd", "https://i.ytimg.com/vi/34Na4j8AVgA/mqdefault.jpg", "https://www.soundhelix.com/examples/mp3/SoundHelix-Song-2.mp3")
+            // Имитация списка из Piped API
+            val tracks = listOf(
+                Track("1", "Starboy", "The Weeknd", "https://i.ytimg.com/vi/34Na4j8AVgA/mqdefault.jpg", "https://pipedproxy.kavin.rocks/videoplayback?id=34Na4j8AVgA&itag=140"),
+                Track("2", "Blinding Lights", "The Weeknd", "https://i.ytimg.com/vi/4NRXx6U8ABQ/mqdefault.jpg", "https://www.soundhelix.com/examples/mp3/SoundHelix-Song-1.mp3")
             )
 
             MaterialTheme {
-                Scaffold(
-                    containerColor = VBlack,
-                    bottomBar = {
-                        currentSong?.let { song ->
-                            MiniPlayer(song, isPlaying) {
-                                if (isPlaying) exoPlayer?.pause() else exoPlayer?.play()
-                                isPlaying = !isPlaying
+                Surface(modifier = Modifier.fillMaxSize(), color = VBlack) {
+                    Scaffold(
+                        containerColor = Color.Transparent,
+                        bottomBar = {
+                            if (currentTrack != null) {
+                                MiniPlayer(currentTrack!!, isPlaying) {
+                                    if (isPlaying) exoPlayer?.pause() else exoPlayer?.play()
+                                    isPlaying = !isPlaying
+                                }
                             }
                         }
-                    }
-                ) { padding ->
-                    Column(modifier = Modifier.padding(padding).fillMaxSize().verticalScroll(rememberScrollState())) {
-                        Text("VibroMusic", color = VGreen, fontSize = 32.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(16.dp))
-                        
-                        // Показываем статус из C++
-                        Text(nativeStatus, color = Color.Gray, fontSize = 12.sp, modifier = Modifier.padding(horizontal = 16.dp))
+                    ) { innerPadding ->
+                        Column(
+                            modifier = Modifier
+                                .padding(innerPadding)
+                                .fillMaxSize()
+                                .verticalScroll(rememberScrollState())
+                        ) {
+                            Text(
+                                "VibroMusic",
+                                modifier = Modifier.padding(16.dp),
+                                color = VGreen,
+                                fontSize = 32.sp,
+                                fontWeight = FontWeight.Bold
+                            )
+                            
+                            Text(
+                                "Status: $nativeStatus",
+                                modifier = Modifier.padding(horizontal = 16.dp),
+                                color = Color.Gray,
+                                fontSize = 12.sp
+                            )
 
-                        Spacer(modifier = Modifier.height(20.dp))
-                        
-                        playlist.forEach { song ->
-                            SongItem(song) {
-                                currentSong = song
-                                val mediaItem = MediaItem.fromUri(song.url)
-                                exoPlayer?.setMediaItem(mediaItem)
-                                exoPlayer?.prepare()
-                                exoPlayer?.play()
-                                isPlaying = true
+                            Spacer(modifier = Modifier.height(20.dp))
+
+                            tracks.forEach { track ->
+                                TrackRow(track) {
+                                    currentTrack = track
+                                    val mediaItem = MediaItem.fromUri(track.streamUrl)
+                                    exoPlayer?.setMediaItem(mediaItem)
+                                    exoPlayer?.prepare()
+                                    exoPlayer?.play()
+                                    isPlaying = true
+                                }
                             }
                         }
                     }
@@ -90,23 +114,54 @@ class MainActivity : ComponentActivity() {
 }
 
 @Composable
-fun SongItem(song: Song, onClick: () -> Unit) {
-    Row(modifier = Modifier.fillMaxWidth().clickable { onClick() }.padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
-        AsyncImage(model = song.cover, contentDescription = null, modifier = Modifier.size(56.dp).clip(RoundedCornerShape(4.dp)), contentScale = ContentScale.Crop)
+fun TrackRow(track: Track, onClick: () -> Unit) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable { onClick() }
+            .padding(horizontal = 16.dp, vertical = 8.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        AsyncImage(
+            model = track.cover,
+            contentDescription = null,
+            modifier = Modifier.size(56.dp).clip(RoundedCornerShape(8.dp)),
+            contentScale = ContentScale.Crop
+        )
         Column(modifier = Modifier.padding(start = 16.dp)) {
-            Text(song.title, color = Color.White, fontWeight = FontWeight.Bold)
-            Text(song.artist, color = Color.Gray, fontSize = 14.sp)
+            Text(track.title, color = Color.White, fontWeight = FontWeight.Bold)
+            Text(track.artist, color = Color.Gray, fontSize = 14.sp)
         }
     }
 }
 
 @Composable
-fun MiniPlayer(song: Song, isPlaying: Boolean, onToggle: () -> Unit) {
-    Row(modifier = Modifier.fillMaxWidth().height(70.dp).background(VGray).padding(8.dp), verticalAlignment = Alignment.CenterVertically) {
-        AsyncImage(model = song.cover, contentDescription = null, modifier = Modifier.size(50.dp).clip(RoundedCornerShape(4.dp)))
-        Text(song.title, color = Color.White, modifier = Modifier.weight(1f).padding(horizontal = 12.dp), maxLines = 1)
-        IconButton(onClick = onToggle) {
-            Icon(if (isPlaying) Icons.Default.PauseCircle else Icons.Default.PlayCircle, contentDescription = null, tint = Color.White, modifier = Modifier.size(48.dp))
+fun MiniPlayer(track: Track, isPlaying: Boolean, onToggle: () -> Unit) {
+    Surface(
+        color = VGray,
+        modifier = Modifier
+            .padding(8.dp)
+            .fillMaxWidth()
+            .height(70.dp)
+            .clip(RoundedCornerShape(12.dp))
+    ) {
+        Row(
+            modifier = Modifier.padding(8.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            AsyncImage(model = track.cover, contentDescription = null, modifier = Modifier.size(50.dp).clip(RoundedCornerShape(8.dp)))
+            Column(modifier = Modifier.weight(1f).padding(horizontal = 12.dp)) {
+                Text(track.title, color = Color.White, fontSize = 14.sp, maxLines = 1)
+                Text(track.artist, color = VGreen, fontSize = 12.sp)
+            }
+            IconButton(onClick = onToggle) {
+                Icon(
+                    if (isPlaying) Icons.Default.PauseCircle else Icons.Default.PlayCircle,
+                    contentDescription = null,
+                    tint = Color.White,
+                    modifier = Modifier.size(48.dp)
+                )
+            }
         }
     }
 }
