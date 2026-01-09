@@ -1,12 +1,10 @@
 package com.example.vibromusic
 
 import android.Manifest
-import android.os.Build
-import android.os.Bundle
+import android.os.*
 import android.widget.Toast
 import androidx.activity.ComponentActivity
-import androidx.activity.compose.rememberLauncherForActivityResult
-import androidx.activity.compose.setContent
+import androidx.activity.compose.*
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.enableEdgeToEdge
 import androidx.compose.animation.*
@@ -20,32 +18,28 @@ import androidx.compose.material.icons.filled.*
 import androidx.compose.material.icons.outlined.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
-import androidx.compose.ui.Alignment
-import androidx.compose.ui.Modifier
+import androidx.compose.ui.*
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.*
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
-import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
+import androidx.compose.ui.unit.*
 import androidx.media3.common.*
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.session.MediaSession
 import coil.compose.AsyncImage
-import com.google.android.gms.auth.api.signin.GoogleSignIn
-import com.google.android.gms.auth.api.signin.GoogleSignInOptions
 import com.google.gson.JsonParser
 import kotlinx.coroutines.*
 import okhttp3.*
 import java.io.IOException
 
-// Темы оформления
+// Цветовая палитра YT Music
 val YTBlack = Color(0xFF000000)
+val YTDark = Color(0xFF121212)
 val YTRed = Color(0xFFFF0000)
 val YTGray = Color(0xFFB3B3B3)
-val YTDarkGray = Color(0xFF121212)
 val VGreen = Color(0xFF1DB954)
 
 data class Track(
@@ -79,36 +73,28 @@ class MainActivity : ComponentActivity() {
             var lyricsLines by remember { mutableStateOf<List<LrcLine>>(emptyList()) }
             var currentTime by remember { mutableStateOf(0L) }
             var repeatMode by remember { mutableStateOf(Player.REPEAT_MODE_OFF) }
-            val localQueue = remember { mutableStateListOf<Track>() }
-            var userName by remember { mutableStateOf("Metadon") }
+            val localList = remember { mutableStateListOf<Track>() }
             var isLoggedIn by remember { mutableStateOf(false) }
             val scope = rememberCoroutineScope()
 
-            // Google Sign-In Setup
-            val gso = GoogleSignInOptions.Builder(GoogleSignInOptions.DEFAULT_SIGN_IN)
-                .requestEmail()
-                .build()
-            val googleSignInClient = GoogleSignIn.getClient(this, gso)
-            val authLauncher = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
-                val task = GoogleSignIn.getSignedInAccountFromIntent(result.data)
-                try {
-                    val account = task.result
-                    userName = account?.displayName ?: "User"
-                    isLoggedIn = true
-                } catch (e: Exception) {
-                    Toast.makeText(this, "Ошибка входа", Toast.LENGTH_SHORT).show()
-                }
-            }
-
-            // Уведомления
-            val permLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) {}
+            // Разрешения
+            val pLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()){}
             LaunchedEffect(Unit) {
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-                    permLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
+                    pLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
                 }
             }
 
-            // Таймер для караоке
+            // Плеер стейт
+            DisposableEffect(Unit) {
+                val listener = object : Player.Listener {
+                    override fun onIsPlayingChanged(p: Boolean) { isPlaying = p }
+                }
+                player.addListener(listener)
+                onDispose { player.removeListener(listener) }
+            }
+
+            // Караоке таймер
             LaunchedEffect(isPlaying) {
                 while (isPlaying) {
                     currentTime = player.currentPosition
@@ -125,42 +111,51 @@ class MainActivity : ComponentActivity() {
                                     searchQuery, { searchQuery = it },
                                     onSearch = { scope.launch(Dispatchers.IO) {
                                         val res = searchPiped(searchQuery)
-                                        withContext(Dispatchers.Main) { searchResults.clear(); searchResults.addAll(res) }
+                                        withContext(Dispatchers.Main) {
+                                            searchResults.clear()
+                                            searchResults.addAll(res)
+                                        }
                                     }},
-                                    searchResults, isLoggedIn, userName,
-                                    onLogin = { authLauncher.launch(googleSignInClient.signInIntent) },
+                                    searchResults, isLoggedIn, { isLoggedIn = true },
                                     onTrackClick = { track ->
-                                        playTrack(track) { 
-                                            currentTrack = it; isPlaying = true
-                                            fetchLyrics(it) { lrc -> lyricsLines = lrc }
+                                        // ЭТАП 2: Получаем поток при клике (Extract Flat logic)
+                                        scope.launch(Dispatchers.IO) {
+                                            val streamUrl = getStreamUrl(track.id)
+                                            withContext(Dispatchers.Main) {
+                                                if (streamUrl.isNotEmpty()) {
+                                                    currentTrack = track.copy(streamUrl = streamUrl)
+                                                    player.setMediaItem(MediaItem.fromUri(streamUrl))
+                                                    player.prepare(); player.play()
+                                                    fetchLyrics(track) { lyricsLines = it }
+                                                }
+                                            }
                                         }
                                     }
                                 )
-                                "library" -> LibraryScreen(localQueue) { track ->
+                                "library" -> LibraryScreen(localList) { track ->
                                     currentTrack = track; isPlaying = true
                                 }
                             }
+                            Spacer(modifier = Modifier.height(130.dp))
                         }
 
-                        // ПЛЕЕРЫ
+                        // Мини-плеер и Навигация
                         Column(modifier = Modifier.align(Alignment.BottomCenter)) {
                             if (currentTrack != null && !isFullScreen) {
                                 MiniPlayer(currentTrack!!, isPlaying, 
-                                    onToggle = { if(player.isPlaying) player.pause() else player.play(); isPlaying = player.isPlaying },
-                                    onClick = { isFullScreen = true }
+                                    { if (isPlaying) player.pause() else player.play() },
+                                    { isFullScreen = true }
                                 )
                             }
                             BottomNav(currentScreen) { currentScreen = it }
                         }
 
-                        // ПОЛНОЭКРАННЫЙ ПЛЕЕР
+                        // Полноэкранный плеер
                         AnimatedVisibility(isFullScreen, enter = slideInVertically { it }, exit = slideOutVertically { it }) {
                             currentTrack?.let { track ->
                                 FullScreenPlayer(
-                                    track = track, isPlaying = isPlaying,
-                                    lyricsLines = lyricsLines, currentTime = currentTime,
-                                    repeatMode = repeatMode,
-                                    onRepeatClick = {
+                                    track, isPlaying, lyricsLines, currentTime, repeatMode,
+                                    onRepeat = {
                                         repeatMode = when(repeatMode) {
                                             Player.REPEAT_MODE_OFF -> Player.REPEAT_MODE_ONE
                                             Player.REPEAT_MODE_ONE -> Player.REPEAT_MODE_ALL
@@ -169,7 +164,7 @@ class MainActivity : ComponentActivity() {
                                         player.repeatMode = repeatMode
                                     },
                                     onClose = { isFullScreen = false },
-                                    onToggle = { if(player.isPlaying) player.pause() else player.play(); isPlaying = player.isPlaying }
+                                    onToggle = { if (isPlaying) player.pause() else player.play() }
                                 )
                             }
                         }
@@ -179,6 +174,7 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    // ЭТАП 1: Поиск только метаданных
     private fun searchPiped(q: String): List<Track> {
         val url = "https://pipedapi.kavin.rocks/search?q=$q&filter=music_songs"
         return try {
@@ -186,32 +182,31 @@ class MainActivity : ComponentActivity() {
             val json = JsonParser.parseString(response.body?.string()).asJsonObject
             json.getAsJsonArray("items").map { 
                 val o = it.asJsonObject
-                Track(o.get("url").asString.split("=").last(), o.get("title").asString, o.get("uploaderName").asString, o.get("thumbnail").asString)
+                Track(
+                    id = o.get("url").asString.split("=").last(),
+                    title = o.get("title").asString,
+                    artist = o.get("uploaderName").asString,
+                    cover = o.get("thumbnail").asString
+                )
             }
         } catch(e: Exception) { emptyList() }
     }
 
-    private fun playTrack(track: Track, onReady: (Track) -> Unit) {
-        CoroutineScope(Dispatchers.IO).launch {
-            try {
-                val resp = client.newCall(Request.Builder().url("https://pipedapi.kavin.rocks/streams/${track.id}").build()).execute()
-                val streamUrl = JsonParser.parseString(resp.body?.string()).asJsonObject.getAsJsonArray("audioStreams")[0].asJsonObject.get("url").asString
-                withContext(Dispatchers.Main) {
-                    player.setMediaItem(MediaItem.fromUri(streamUrl))
-                    player.prepare(); player.play()
-                    onReady(track.copy(streamUrl = streamUrl))
-                }
-            } catch(e: Exception) {}
-        }
+    private fun getStreamUrl(id: String): String {
+        val url = "https://pipedapi.kavin.rocks/streams/$id"
+        return try {
+            val resp = client.newCall(Request.Builder().url(url).build()).execute()
+            JsonParser.parseString(resp.body?.string()).asJsonObject.getAsJsonArray("audioStreams")[0].asJsonObject.get("url").asString
+        } catch(e: Exception) { "" }
     }
 
-    private fun fetchLyrics(track: Track, onResult: (List<LrcLine>) -> Unit) {
+    private fun fetchLyrics(track: Track, onRes: (List<LrcLine>) -> Unit) {
         val url = "https://lrclib.net/api/get?artist_name=${track.artist}&track_name=${track.title}"
         client.newCall(Request.Builder().url(url).build()).enqueue(object : Callback {
             override fun onResponse(call: Call, response: Response) {
                 val body = response.body?.string() ?: return
                 val lrc = JsonParser.parseString(body).asJsonObject.get("syncedLyrics")?.asString ?: ""
-                onResult(parseLrc(lrc))
+                onRes(parseLrc(lrc))
             }
             override fun onFailure(call: Call, e: IOException) {}
         })
@@ -231,155 +226,144 @@ class MainActivity : ComponentActivity() {
     }
 }
 
-// --- КОМПОНЕНТЫ UI ---
+// --- UI COMPONENTS ---
 
 @Composable
-fun HomeScreen(q: String, onQ: (String) -> Unit, onSearch: () -> Unit, results: List<Track>, isLogged: Boolean, user: String, onLogin: () -> Unit, onTrackClick: (Track) -> Unit) {
+fun HomeScreen(q: String, onQ: (String) -> Unit, onSearch: () -> Unit, results: List<Track>, logged: Boolean, onLog: () -> Unit, onTrack: (Track) -> Unit) {
     Column(modifier = Modifier.fillMaxSize().verticalScroll(rememberScrollState())) {
         Spacer(modifier = Modifier.height(50.dp))
-        Row(modifier = Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
+        Row(Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
             Icon(Icons.Default.PlayCircle, null, tint = YTRed, modifier = Modifier.size(32.dp))
-            Text(" Music", color = Color.White, fontSize = 24.sp, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))
-            if(!isLogged) Button(onClick = onLogin, colors = ButtonDefaults.buttonColors(YTDarkGray)) { Text("Войти в YT") }
-            else Text(user, color = VGreen, fontWeight = FontWeight.Bold)
+            Text(" Music", color = Color.White, fontSize = 22.sp, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))
+            Button(onClick = onLog, colors = ButtonDefaults.buttonColors(YTDark)) { 
+                Text(if(logged) "Metadon" else "Войти в YT", color = Color.White) 
+            }
         }
 
         TextField(
             value = q, onValueChange = onQ, 
             modifier = Modifier.fillMaxWidth().padding(16.dp).clip(RoundedCornerShape(12.dp)),
             placeholder = { Text("Поиск в VibroMusic...") },
-            leadingIcon = { Icon(Icons.Default.Search, null) },
+            leadingIcon = { Icon(Icons.Default.Search, null, tint = Color.White) },
             keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
             keyboardActions = KeyboardActions(onSearch = { onSearch() }),
-            colors = TextFieldDefaults.colors(focusedContainerColor = YTDarkGray, unfocusedContainerColor = YTDarkGray, focusedTextColor = Color.White)
+            colors = TextFieldDefaults.colors(focusedContainerColor = YTDark, unfocusedContainerColor = YTDark, focusedTextColor = Color.White)
         )
 
         if (results.isEmpty()) {
-            CategoryChips()
-            Text("Здравствуйте, $user!", color = Color.White, fontSize = 28.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(16.dp))
-            PlaylistCarousel("Рекомендации для вас")
-            ArtistCarousel("Популярные артисты")
+            LazyRow(Modifier.padding(horizontal = 16.dp)) {
+                items(listOf("Релакс", "Энергия", "Спорт", "Вечеринка")) { 
+                    Text(it, color = Color.White, modifier = Modifier.background(YTDark, RoundedCornerShape(8.dp)).padding(8.dp))
+                    Spacer(Modifier.width(8.dp))
+                }
+            }
+            Text("Здравствуйте, Metadon!", color = Color.White, fontSize = 28.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(16.dp))
+            RecommendationSection("Рекомендации")
+            RecommendationSection("Популярные артисты", isCircle = true)
         } else {
-            results.forEach { TrackItem(it, onTrackClick) }
+            results.forEach { TrackItem(it, onTrack) }
         }
-        Spacer(modifier = Modifier.height(150.dp))
     }
 }
 
 @Composable
-fun FullScreenPlayer(track: Track, isPlaying: Boolean, lyricsLines: List<LrcLine>, currentTime: Long, repeatMode: Int, onRepeatClick: () -> Unit, onClose: () -> Unit, onToggle: () -> Unit) {
+fun FullScreenPlayer(track: Track, playing: Boolean, lyrics: List<LrcLine>, time: Long, repeat: Int, onRepeat: () -> Unit, onClose: () -> Unit, onToggle: () -> Unit) {
     var tab by remember { mutableStateOf("текст") }
     Box(modifier = Modifier.fillMaxSize().background(Brush.verticalGradient(listOf(track.accentColor, YTBlack)))) {
-        Column(modifier = Modifier.padding(24.dp)) {
-            IconButton(onClick = onClose, modifier = Modifier.padding(top = 20.dp)) { Icon(Icons.Default.KeyboardArrowDown, null, tint = Color.White) }
-            
-            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.Center) {
-                TabItem("ДАЛЕЕ", tab == "далее") { tab = "далее" }
-                TabItem("ТЕКСТ", tab == "текст") { tab = "текст" }
-                TabItem("ПОХОЖИЕ", tab == "похожие") { tab = "похожие" }
+        Column(Modifier.padding(24.dp)) {
+            IconButton(onClick = onClose, Modifier.padding(top = 20.dp)) { Icon(Icons.Default.KeyboardArrowDown, null, tint = Color.White) }
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.Center) {
+                Text("ДАЛЕЕ", Modifier.padding(16.dp).clickable { tab = "далее" }, color = if(tab=="далее") Color.White else YTGray)
+                Text("ТЕКСТ", Modifier.padding(16.dp).clickable { tab = "текст" }, color = if(tab=="текст") Color.White else YTGray)
             }
 
             if (tab == "текст") {
-                LyricsKaraokeView(lyricsLines, currentTime)
+                LyricsView(lyrics, time)
             } else {
-                Spacer(modifier = Modifier.height(40.dp))
+                Spacer(Modifier.height(40.dp))
                 AsyncImage(model = track.cover, contentDescription = null, modifier = Modifier.fillMaxWidth().aspectRatio(1f).clip(RoundedCornerShape(12.dp)), contentScale = ContentScale.Crop)
                 Text(track.title, color = Color.White, fontSize = 24.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(top = 20.dp))
                 Text(track.artist, color = YTGray, fontSize = 18.sp)
             }
 
-            Spacer(modifier = Modifier.weight(1f))
-            
-            // Управление
-            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-                IconButton(onClick = onRepeatClick) { 
-                    Icon(if(repeatMode == Player.REPEAT_MODE_ONE) Icons.Default.RepeatOne else Icons.Default.Repeat, null, tint = if(repeatMode != Player.REPEAT_MODE_OFF) VGreen else Color.White) 
+            Spacer(Modifier.weight(1f))
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+                IconButton(onClick = onRepeat) { 
+                    Icon(if(repeat == Player.REPEAT_MODE_ONE) Icons.Default.RepeatOne else Icons.Default.Repeat, null, tint = if(repeat != Player.REPEAT_MODE_OFF) VGreen else Color.White) 
                 }
-                Icon(Icons.Default.SkipPrevious, null, tint = Color.White, modifier = Modifier.size(45.dp))
-                IconButton(onClick = onToggle, modifier = Modifier.size(80.dp).background(Color.White, CircleShape)) {
-                    Icon(if (isPlaying) Icons.Default.Pause else Icons.Default.PlayArrow, null, tint = Color.Black, modifier = Modifier.size(40.dp))
+                Icon(Icons.Default.SkipPrevious, null, tint = Color.White, Modifier.size(40.dp))
+                IconButton(onClick = onToggle, Modifier.size(80.dp).background(Color.White, CircleShape)) {
+                    Icon(if(playing) Icons.Default.Pause else Icons.Default.PlayArrow, null, tint = Color.Black, Modifier.size(40.dp))
                 }
-                Icon(Icons.Default.SkipNext, null, tint = Color.White, modifier = Modifier.size(45.dp))
+                Icon(Icons.Default.SkipNext, null, tint = Color.White, Modifier.size(40.dp))
                 Icon(Icons.Default.Shuffle, null, tint = Color.White)
             }
-            Spacer(modifier = Modifier.height(20.dp))
         }
     }
 }
 
 @Composable
-fun LyricsKaraokeView(lines: List<LrcLine>, currentTime: Long) {
+fun LyricsView(lines: List<LrcLine>, time: Long) {
     val state = rememberLazyListState()
-    val index = lines.indexOfLast { it.time <= currentTime }
+    val index = lines.indexOfLast { it.time <= time }
     LaunchedEffect(index) { if(index >= 0) state.animateScrollToItem(index) }
-
     LazyColumn(state = state, modifier = Modifier.fillMaxHeight(0.7f)) {
         itemsIndexed(lines) { i, line ->
-            Text(
-                line.text, 
-                color = if(i == index) Color.White else Color.White.copy(0.3f), 
-                fontSize = if(i == index) 30.sp else 22.sp, 
-                fontWeight = FontWeight.Bold,
-                modifier = Modifier.padding(vertical = 12.dp).animateContentSize()
-            )
+            Text(line.text, color = if(i == index) Color.White else Color.White.copy(0.3f), fontSize = if(i == index) 28.sp else 22.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(vertical = 12.dp))
         }
     }
 }
 
 @Composable
-fun TabItem(label: String, selected: Boolean, onClick: () -> Unit) {
-    Text(label, modifier = Modifier.padding(16.dp).clickable { onClick() }, color = if(selected) Color.White else YTGray, fontWeight = FontWeight.Bold)
-}
-
-@Composable
-fun BottomNav(curr: String, onNav: (String) -> Unit) {
-    NavigationBar(containerColor = YTBlack, modifier = Modifier.height(64.dp)) {
-        val navItems = listOf("home" to Icons.Default.Home, "samples" to Icons.Default.SlowMotionVideo, "explore" to Icons.Default.Explore, "library" to Icons.Default.LibraryMusic)
-        navItems.forEach { (route, icon) ->
-            NavigationBarItem(
-                selected = curr == route, 
-                onClick = { onNav(route) }, 
-                icon = { Icon(icon, null, tint = Color.White) },
-                colors = NavigationBarItemDefaults.colors(indicatorColor = Color.Transparent)
-            )
-        }
-    }
-}
-
-@Composable fun LibraryScreen(music: MutableList<Track>, onTrack: (Track) -> Unit) {
-    val picker = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri ->
-        uri?.let { music.add(Track(it.toString(), "Локальный файл", "Импорт", "")) }
-    }
-    Column(modifier = Modifier.padding(16.dp)) {
-        Spacer(modifier = Modifier.height(50.dp))
-        Text("Медиатека", color = Color.White, fontSize = 28.sp, fontWeight = FontWeight.Bold)
-        Button(onClick = { picker.launch("audio/*") }, modifier = Modifier.padding(vertical = 16.dp)) { Text("Импорт своей музыки") }
-        LazyColumn { items(music) { TrackItem(it, onTrack) } }
-    }
-}
-
-@Composable fun TrackItem(t: Track, onClick: (Track) -> Unit) {
-    Row(modifier = Modifier.fillMaxWidth().clickable { onClick(t) }.padding(vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
-        AsyncImage(model = t.cover, contentDescription = null, modifier = Modifier.size(56.dp).clip(RoundedCornerShape(8.dp)), contentScale = ContentScale.Crop)
-        Column(modifier = Modifier.padding(start = 12.dp)) {
+fun TrackItem(t: Track, onClick: (Track) -> Unit) {
+    Row(Modifier.fillMaxWidth().clickable { onClick(t) }.padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
+        AsyncImage(model = t.cover, contentDescription = null, modifier = Modifier.size(56.dp).clip(RoundedCornerShape(4.dp)))
+        Column(Modifier.padding(start = 12.dp)) {
             Text(t.title, color = Color.White, fontWeight = FontWeight.Bold); Text(t.artist, color = YTGray)
         }
     }
 }
 
-@Composable fun MiniPlayer(t: Track, isPlaying: Boolean, onToggle: () -> Unit, onClick: () -> Unit) {
-    Surface(color = YTDarkGray, modifier = Modifier.fillMaxWidth().height(64.dp).clickable { onClick() }) {
+@Composable
+fun MiniPlayer(t: Track, p: Boolean, onToggle: () -> Unit, onClick: () -> Unit) {
+    Surface(color = YTDark, modifier = Modifier.fillMaxWidth().height(64.dp).clickable { onClick() }) {
         Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(horizontal = 12.dp)) {
             AsyncImage(model = t.cover, contentDescription = null, modifier = Modifier.size(48.dp).clip(RoundedCornerShape(4.dp)))
-            Column(modifier = Modifier.weight(1f).padding(horizontal = 12.dp)) {
+            Column(Modifier.weight(1f).padding(horizontal = 12.dp)) {
                 Text(t.title, color = Color.White, fontSize = 14.sp, maxLines = 1); Text(t.artist, color = YTGray, fontSize = 12.sp)
             }
-            IconButton(onClick = onToggle) { Icon(if (isPlaying) Icons.Default.Pause else Icons.Default.PlayArrow, null, tint = Color.White) }
+            IconButton(onClick = onToggle) { Icon(if(p) Icons.Default.Pause else Icons.Default.PlayArrow, null, tint = Color.White) }
         }
     }
 }
 
-// Заглушки дизайна
-@Composable fun CategoryChips() { LazyRow(Modifier.padding(horizontal = 16.dp)) { items(listOf("Релакс", "Энергия", "Спорт", "Вечеринка")) { Text(it, color = Color.White, modifier = Modifier.background(YTDarkGray, RoundedCornerShape(8.dp)).padding(8.dp)); Spacer(Modifier.width(8.dp)) } } }
-@Composable fun PlaylistCarousel(t: String) { Text(t, color = Color.White, fontSize = 20.sp, modifier = Modifier.padding(16.dp)); LazyRow { items(4) { Box(Modifier.size(150.dp).background(YTDarkGray).padding(8.dp)); Spacer(Modifier.width(12.dp)) } } }
-@Composable fun ArtistCarousel(t: String) { Text(t, color = Color.White, fontSize = 20.sp, modifier = Modifier.padding(16.dp)); LazyRow { items(4) { Box(Modifier.size(110.dp).clip(CircleShape).background(YTDarkGray)); Spacer(Modifier.width(16.dp)) } } }
+@Composable
+fun BottomNav(curr: String, onNav: (String) -> Unit) {
+    NavigationBar(containerColor = YTBlack, modifier = Modifier.height(64.dp)) {
+        val navItems = listOf("home" to Icons.Default.Home, "library" to Icons.Default.LibraryMusic)
+        navItems.forEach { (route, icon) ->
+            NavigationBarItem(selected = curr == route, onClick = { onNav(route) }, icon = { Icon(icon, null, tint = Color.White) }, colors = NavigationBarItemDefaults.colors(indicatorColor = Color.Transparent))
+        }
+    }
+}
+
+@Composable fun LibraryScreen(music: MutableList<Track>, onTrack: (Track) -> Unit) {
+    val p = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri -> 
+        uri?.let { music.add(Track(it.toString(), "Свой файл", "Локально", "")) }
+    }
+    Column(Modifier.padding(16.dp)) {
+        Spacer(Modifier.height(50.dp))
+        Text("Медиатека", color = Color.White, fontSize = 28.sp, fontWeight = FontWeight.Bold)
+        Button(onClick = { p.launch("audio/*") }, Modifier.padding(vertical = 16.dp)) { Text("Импорт") }
+        LazyColumn { items(music) { TrackItem(it, onTrack) } }
+    }
+}
+
+@Composable fun RecommendationSection(title: String, isCircle: Boolean = false) {
+    Column {
+        Text(title, color = Color.White, fontSize = 20.sp, modifier = Modifier.padding(16.dp))
+        LazyRow(Modifier.padding(horizontal = 16.dp)) {
+            items(5) { Box(Modifier.size(if(isCircle) 110.dp else 140.dp).clip(if(isCircle) CircleShape else RoundedCornerShape(8.dp)).background(YTDark)) ; Spacer(Modifier.width(12.dp)) }
+        }
+    }
+}
