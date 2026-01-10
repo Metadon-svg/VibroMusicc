@@ -11,7 +11,6 @@ import androidx.compose.animation.*
 import androidx.compose.foundation.*
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.*
-import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.*
 import androidx.compose.foundation.text.*
 import androidx.compose.material.icons.Icons
@@ -32,8 +31,8 @@ import coil.compose.AsyncImage
 import com.google.gson.JsonParser
 import kotlinx.coroutines.*
 import okhttp3.*
+import java.io.IOException // ВОТ ЭТОТ ИМПОРТ БЫЛ НУЖЕН!
 
-// Цвета YT Music
 val YTBlack = Color(0xFF000000)
 val YTDark = Color(0xFF121212)
 val YTRed = Color(0xFFFF0000)
@@ -50,14 +49,7 @@ class MainActivity : ComponentActivity() {
     private lateinit var player: ExoPlayer
     private var mediaSession: MediaSession? = null
     private val client = OkHttpClient()
-
-    // Список серверов для надежности (если один не работает, пробуем другой)
-    private val pipedInstances = listOf(
-        "https://pipedapi.kavin.rocks",
-        "https://piped-api.lunar.icu",
-        "https://api.piped.yt",
-        "https://pipedapi.leptons.xyz"
-    )
+    private val pipedInstances = listOf("https://pipedapi.kavin.rocks", "https://piped-api.lunar.icu", "https://api.piped.yt")
 
     companion object { init { System.loadLibrary("vibromusic") } }
     external fun getNativeStatus(): String
@@ -75,6 +67,7 @@ class MainActivity : ComponentActivity() {
             var isFullScreen by remember { mutableStateOf(false) }
             var currentScreen by remember { mutableStateOf("home") }
             var searchQuery by remember { mutableStateOf("") }
+            var isSearching by remember { mutableStateOf(false) }
             val searchResults = remember { mutableStateListOf<Track>() }
             var lyricsLines by remember { mutableStateOf<List<LrcLine>>(emptyList()) }
             var currentTime by remember { mutableStateOf(0L) }
@@ -83,7 +76,7 @@ class MainActivity : ComponentActivity() {
             var isLoggedIn by remember { mutableStateOf(false) }
             val scope = rememberCoroutineScope()
 
-            // 1. МГНОВЕННЫЙ ЗАПРОС УВЕДОМЛЕНИЙ ПРИ ВХОДЕ
+            // 1. ЗАПРОС УВЕДОМЛЕНИЙ ПРИ ВХОДЕ
             val pLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()){}
             LaunchedEffect(Unit) {
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
@@ -91,7 +84,6 @@ class MainActivity : ComponentActivity() {
                 }
             }
 
-            // Плеер стейт
             DisposableEffect(Unit) {
                 val listener = object : Player.Listener {
                     override fun onIsPlayingChanged(p: Boolean) { isPlaying = p }
@@ -100,7 +92,6 @@ class MainActivity : ComponentActivity() {
                 onDispose { player.removeListener(listener) }
             }
 
-            // Караоке таймер
             LaunchedEffect(isPlaying) {
                 while (isPlaying) {
                     currentTime = player.currentPosition
@@ -116,18 +107,22 @@ class MainActivity : ComponentActivity() {
                                 "home" -> HomeScreen(
                                     q = searchQuery,
                                     onQ = { searchQuery = it },
-                                    onSearch = { scope.launch(Dispatchers.IO) {
-                                        val res = searchPiped(searchQuery)
-                                        withContext(Dispatchers.Main) {
-                                            searchResults.clear()
-                                            searchResults.addAll(res)
+                                    onSearch = { 
+                                        isSearching = true
+                                        scope.launch(Dispatchers.IO) {
+                                            val res = searchPiped(searchQuery)
+                                            withContext(Dispatchers.Main) {
+                                                searchResults.clear()
+                                                searchResults.addAll(res)
+                                                isSearching = false
+                                            }
                                         }
-                                    }},
+                                    },
+                                    loading = isSearching,
                                     results = searchResults.toList(),
                                     logged = isLoggedIn,
                                     onLog = { isLoggedIn = true },
                                     onTrackClick = { track: Track ->
-                                        // "Extract Flat" - получаем поток только при нажатии
                                         scope.launch(Dispatchers.IO) {
                                             val streamUrl = getStreamUrl(track.id)
                                             withContext(Dispatchers.Main) {
@@ -155,11 +150,9 @@ class MainActivity : ComponentActivity() {
                         // Мини-плеер
                         Column(modifier = Modifier.align(Alignment.BottomCenter)) {
                             if (currentTrack != null && !isFullScreen) {
-                                MiniPlayer(
-                                    track = currentTrack!!, 
-                                    isPlaying = isPlaying, 
-                                    onToggle = { if (isPlaying) player.pause() else player.play() },
-                                    onClick = { isFullScreen = true }
+                                MiniPlayer(currentTrack!!, isPlaying, 
+                                    { if (isPlaying) player.pause() else player.play() },
+                                    { isFullScreen = true }
                                 )
                             }
                             BottomNav(currentScreen) { route: String -> currentScreen = route }
@@ -169,11 +162,7 @@ class MainActivity : ComponentActivity() {
                         AnimatedVisibility(isFullScreen, enter = slideInVertically { it }, exit = slideOutVertically { it }) {
                             currentTrack?.let { track: Track ->
                                 FullScreenPlayer(
-                                    track = track, 
-                                    isPlaying = isPlaying, 
-                                    lyricsLines = lyricsLines, 
-                                    currentTime = currentTime, 
-                                    repeatMode = repeatMode,
+                                    track, isPlaying, lyricsLines, currentTime, repeatMode,
                                     onRepeat = {
                                         repeatMode = when(repeatMode) {
                                             Player.REPEAT_MODE_OFF -> Player.REPEAT_MODE_ONE
@@ -193,8 +182,8 @@ class MainActivity : ComponentActivity() {
         }
     }
 
-    // ЛОГИКА ПОИСКА С ПЕРЕБОРОМ СЕРВЕРОВ
     private fun searchPiped(q: String): List<Track> {
+        if (q.isEmpty()) return emptyList()
         for (baseUrl in pipedInstances) {
             try {
                 val url = "$baseUrl/search?q=$q&filter=music_songs"
@@ -203,13 +192,13 @@ class MainActivity : ComponentActivity() {
                 return json.getAsJsonArray("items").map { 
                     val o = it.asJsonObject
                     Track(
-                        id = o.get("url").asString.split("=").last(),
+                        id = o.get("url").asString.substringAfterLast("v=").substringAfterLast("/"),
                         title = o.get("title").asString,
                         artist = o.get("uploaderName").asString,
                         cover = o.get("thumbnail").asString
                     )
                 }
-            } catch(e: Exception) { continue } // Если сервер упал, пробуем следующий
+            } catch(e: Exception) { continue }
         }
         return emptyList()
     }
@@ -229,9 +218,11 @@ class MainActivity : ComponentActivity() {
         val url = "https://lrclib.net/api/get?artist_name=${track.artist}&track_name=${track.title}"
         client.newCall(Request.Builder().url(url).build()).enqueue(object : Callback {
             override fun onResponse(call: Call, response: Response) {
-                val body = response.body?.string() ?: return
-                val lrc = JsonParser.parseString(body).asJsonObject.get("syncedLyrics")?.asString ?: ""
-                onRes(parseLrc(lrc))
+                try {
+                    val body = response.body?.string() ?: return
+                    val lrc = JsonParser.parseString(body).asJsonObject.get("syncedLyrics")?.asString ?: ""
+                    onRes(parseLrc(lrc))
+                } catch(e: Exception) {}
             }
             override fun onFailure(call: Call, e: IOException) {}
         })
@@ -251,10 +242,8 @@ class MainActivity : ComponentActivity() {
     }
 }
 
-// --- ИНТЕРФЕЙС (Масштабируемый и явный) ---
-
 @Composable
-fun HomeScreen(q: String, onQ: (String) -> Unit, onSearch: () -> Unit, results: List<Track>, logged: Boolean, onLog: () -> Unit, onTrackClick: (Track) -> Unit) {
+fun HomeScreen(q: String, onQ: (String) -> Unit, onSearch: () -> Unit, loading: Boolean, results: List<Track>, logged: Boolean, onLog: () -> Unit, onTrackClick: (Track) -> Unit) {
     Column(modifier = Modifier.fillMaxSize().verticalScroll(rememberScrollState())) {
         Spacer(modifier = Modifier.height(50.dp))
         Row(Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -275,7 +264,13 @@ fun HomeScreen(q: String, onQ: (String) -> Unit, onSearch: () -> Unit, results: 
             colors = TextFieldDefaults.colors(focusedContainerColor = YTDark, unfocusedContainerColor = YTDark, focusedTextColor = Color.White)
         )
 
-        if (results.isEmpty()) {
+        if (loading) {
+            Box(Modifier.fillMaxWidth().padding(20.dp), contentAlignment = Alignment.Center) {
+                CircularProgressIndicator(color = VGreen)
+            }
+        }
+
+        if (results.isEmpty() && !loading) {
             LazyRow(Modifier.padding(horizontal = 16.dp)) {
                 items(items = listOf("Релакс", "Энергия", "Спорт", "Вечеринка")) { chip: String ->
                     Text(chip, color = Color.White, modifier = Modifier.background(YTDark, RoundedCornerShape(8.dp)).padding(8.dp))
@@ -283,8 +278,7 @@ fun HomeScreen(q: String, onQ: (String) -> Unit, onSearch: () -> Unit, results: 
                 }
             }
             Text("Здравствуйте, Metadon!", color = Color.White, fontSize = 28.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(16.dp))
-            RecommendationSection("Рекомендации для вас", isCircle = false)
-            RecommendationSection("Популярные артисты", isCircle = true)
+            RecommendationSection("Рекомендации для вас")
         } else {
             results.forEach { track: Track -> TrackItem(track = track, onClick = onTrackClick) }
         }
@@ -333,9 +327,8 @@ fun LyricsView(lines: List<LrcLine>, time: Long) {
     val index = lines.indexOfLast { it.time <= time }
     LaunchedEffect(index) { if(index >= 0) state.animateScrollToItem(index) }
     LazyColumn(state = state, modifier = Modifier.fillMaxHeight(0.7f)) {
-        items(items = lines) { line: LrcLine ->
-            val isActive = lines.indexOf(line) == index
-            Text(line.text, color = if(isActive) Color.White else Color.White.copy(0.3f), fontSize = if(isActive) 28.sp else 22.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(vertical = 12.dp))
+        itemsIndexed(items = lines) { i: Int, line: LrcLine ->
+            Text(line.text, color = if(i == index) Color.White else Color.White.copy(0.3f), fontSize = if(i == index) 28.sp else 22.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(vertical = 12.dp))
         }
     }
 }
@@ -381,11 +374,11 @@ fun BottomNav(current: String, onNav: (String) -> Unit) {
     }
 }
 
-@Composable fun RecommendationSection(title: String, isCircle: Boolean = false) {
+@Composable fun RecommendationSection(title: String) {
     Column {
         Text(title, color = Color.White, fontSize = 20.sp, modifier = Modifier.padding(16.dp))
         LazyRow(Modifier.padding(horizontal = 16.dp)) {
-            items(count = 5) { Box(Modifier.size(if(isCircle) 110.dp else 140.dp).clip(if(isCircle) CircleShape else RoundedCornerShape(8.dp)).background(YTDark)) ; Spacer(Modifier.width(12.dp)) }
+            items(count = 5) { Box(Modifier.size(140.dp).clip(RoundedCornerShape(8.dp)).background(YTDark)) ; Spacer(Modifier.width(12.dp)) }
         }
     }
 }
