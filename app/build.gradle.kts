@@ -6,7 +6,6 @@ plugins {
 android {
     namespace = "com.example.vibromusic"
     compileSdk = 34
-
     defaultConfig {
         applicationId = "com.example.vibromusic"
         minSdk = 26
@@ -15,11 +14,9 @@ android {
         versionName = "1.0"
         externalNativeBuild { cmake { cppFlags("") } }
     }
-
     externalNativeBuild {
         cmake { path = file("src/main/cpp/CMakeLists.txt"); version = "3.22.1" }
     }
-
     buildTypes {
         release {
             isMinifyEnabled = false
@@ -43,13 +40,10 @@ dependencies {
     implementation("androidx.compose.material3:material3")
     implementation("androidx.compose.material:material-icons-extended")
     implementation("io.coil-kt:coil-compose:2.5.0")
-    
-    // Плеер и Уведомления
     implementation("androidx.media3:media3-exoplayer:1.2.1")
     implementation("androidx.media3:media3-session:1.2.1")
     implementation("androidx.media3:media3-ui:1.2.1")
-
-    // Сеть и JSON
+    implementation("com.google.android.gms:play-services-auth:20.7.0")
     implementation("com.squareup.okhttp3:okhttp:4.12.0")
     implementation("com.google.code.gson:gson:2.10.1")
 }
